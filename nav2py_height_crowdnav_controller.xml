@@ -1,0 +1,9 @@
+<class_libraries>
+    <library path="nav2py_height_crowdnav_controller">
+        <class type="nav2py_height_crowdnav_controller::HeightCrowdNavController" base_class_type="nav2_core::Controller">
+            <description>
+                Height CrowdNav controller for navigation in dense human environments.
+            </description>
+        </class>
+    </library>
+</class_libraries>
