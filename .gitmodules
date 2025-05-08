@@ -4,3 +4,7 @@
 	branch = main
 	
 
+[submodule "nav2py_height_crowdnav_controller/CrowdNav_HEIGHT"]
+	path = nav2py_height_crowdnav_controller/CrowdNav_HEIGHT
+	url = https://github.com/NamTruongTran/Height_CrowdNav
+	branch = main
