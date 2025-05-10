@@ -6,27 +6,27 @@ import numpy as np
 import os
 import torch
 import math
-from .pas_controller import PaSController, set_log_level
-from PaS_CrowdNav.crowd_nav.configs.config import Config
+from .height_controller import HeightController, set_log_level
+from Height_CrowdNav.crowd_nav.configs.config import Config
 
 
-class nav2py_pas_crowdnav_controller(nav2py.interfaces.nav2py_costmap_controller):
+class nav2py_height_crowdnav_controller(nav2py.interfaces.nav2py_costmap_controller):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._register_callback('path', self._path_callback)
         self._register_callback('costmap_pose', self._costmap_pose_callback)
 
-        self.logger = logging.getLogger('nav2py_pas_crowdnav_controller')
+        self.logger = logging.getLogger('nav2py_height_crowdnav_controller')
 
         set_log_level(self.logger, 'info')
 
         self.path = None  # Store the latest path
         self.frame_count = 0
 
-        # Initialize PaSController
+        # Initialize HeightController
         try:
-            self.logger.info("Initializing PaSController...")
+            self.logger.info("Initializing HeightController...")
 
             config = Config()
 
@@ -36,65 +36,59 @@ class nav2py_pas_crowdnav_controller(nav2py.interfaces.nav2py_costmap_controller
                 package_share_dir = os.path.dirname(__file__)
                 model_dir = os.path.join(package_share_dir, '../../../..', 'share', 'models')
 
-                vae_path = os.path.join(model_dir, 'vae.pth')
                 policy_path = os.path.join(model_dir, 'policy.pt')
 
                 self.logger.info(f"Looking for models in: {model_dir}")
 
                 # Check if model files exist in the installed location
-                if not os.path.exists(vae_path) or not os.path.exists(policy_path):
+                if not os.path.exists(policy_path):
                     # Fallback to current directory (for development)
                     current_dir = os.path.dirname(os.path.abspath(__file__))
-                    vae_path = os.path.join(current_dir, 'vae.pth')
                     policy_path = os.path.join(current_dir, 'policy.pt')
 
                     self.logger.info(f"Models not found in share directory, looking in: {current_dir}")
 
                     # If still not found, check parent directory for models folder
-                    if not os.path.exists(vae_path) or not os.path.exists(policy_path):
+                    if not os.path.exists(policy_path):
                         parent_dir = os.path.dirname(current_dir)
-                        vae_path = os.path.join(parent_dir, 'models', 'vae.pth')
                         policy_path = os.path.join(parent_dir, 'models', 'policy.pt')
 
                         self.logger.info(f"Models not found in package dir, looking in: {os.path.join(parent_dir, 'models')}")
 
             except Exception as e:
                 self.logger.warn(f"Error finding model paths: {e}")
-                vae_path = None
                 policy_path = None
 
             # Check if model files exist
-            if not os.path.exists(vae_path) or not os.path.exists(policy_path):
-                self.logger.warn(f"Model files not found at {vae_path} or {policy_path}")
+            if not os.path.exists(policy_path):
+                self.logger.warn(f"Model files not found at {policy_path}")
                 self.logger.warn("Using simple obstacle avoidance instead")
-                vae_path = None
                 policy_path = None
             else:
-                self.logger.info(f"Found model files at {vae_path} and {policy_path}")
+                self.logger.info(f"Found model files at {policy_path}")
 
             device = "cuda" if torch.cuda.is_available() else "cpu"
             self.logger.info(f"Using device: {device}")
 
-            # Create PaSController instance
-            self.pas_controller = PaSController(
-                vae_path=vae_path,
+            # Create HeightController instance
+            self.height_controller = HeightController(
                 policy_path=policy_path,
                 device=device,
                 config=config
             )
 
-            self.logger.info("PaSController initialized successfully")
+            self.logger.info("HeightController initialized successfully")
 
         except Exception as e:
             import traceback
-            self.logger.error(f"Error initializing PaSController: {e}")
+            self.logger.error(f"Error initializing HeightController: {e}")
             self.logger.error(traceback.format_exc())
 
-            # Create a backup simple controller if PaSController initialization fails
-            self.pas_controller = None
+            # Create a backup simple controller if HeightController initialization fails
+            self.height_controller = None
             self.logger.warn("Using simple obstacle avoidance fallback")
 
-        self.logger.info("nav2py_pas_crowdnav_controller initialized")
+        self.logger.info("nav2py_height_crowdnav_controller initialized")
 
     def _path_callback(self, path_):
         """
@@ -186,7 +180,7 @@ class nav2py_pas_crowdnav_controller(nav2py.interfaces.nav2py_costmap_controller
             else:
                 self.logger.warn("No path available, cannot determine goal position")
 
-            # Process costmap data with PaSController
+            # Process costmap data with HeightController
             if width > 0 and height > 0 and len(costmap_data) == width * height:
                 # Convert to numpy array for processing
                 costmap_array = np.array(costmap_data, dtype=np.uint8).reshape(height, width)
@@ -211,10 +205,10 @@ class nav2py_pas_crowdnav_controller(nav2py.interfaces.nav2py_costmap_controller
                             normalized_costmap[i, j] = cost / 255.0
 
                 # Determine control commands
-                if self.pas_controller is not None:
+                if self.height_controller is not None:
                     try:
-                        # Use PaSController to determine velocity commands
-                        linear_x, angular_z = self.pas_controller.process_costmap(
+                        # Use HeightController to determine velocity commands
+                        linear_x, angular_z = self.height_controller.process_costmap(
                             normalized_costmap,
                             pose,
                             resolution,
@@ -224,20 +218,20 @@ class nav2py_pas_crowdnav_controller(nav2py.interfaces.nav2py_costmap_controller
                             goal_pose
                         )
 
-                        # Check if PaSController returned valid commands
+                        # Check if HeightController returned valid commands
                         if linear_x is None or angular_z is None:
                             # Fallback to simple obstacle avoidance
-                            self.logger.info("PaSController returned None, using fallback")
+                            self.logger.info("HeightController returned None, using fallback")
                             linear_x, angular_z = 0.0, 0.0
                         else:
-                            self.logger.info(f"PaSController output: linear_x={linear_x:.2f}, angular_z={angular_z:.2f}")
+                            self.logger.info(f"HeightController output: linear_x={linear_x:.2f}, angular_z={angular_z:.2f}")
                     except Exception as e:
-                        self.logger.error(f"Error in PaSController: {e}")
+                        self.logger.error(f"Error in HeightController: {e}")
                         # Fallback to simple obstacle avoidance
                         linear_x, angular_z = 0.0, 0.0
                         self.logger.info(f"Fallback control: linear_x={linear_x:.2f}, angular_z={angular_z:.2f}")
                 else:
-                    # Use simple obstacle avoidance if PaSController is not available
+                    # Use simple obstacle avoidance if HeightController is not available
                     # set the linear_x and angular_z to 0.0
                     linear_x, angular_z = 0.0, 0.0
                     self.logger.info(f"Simple obstacle avoidance: linear_x={linear_x:.2f}, angular_z={angular_z:.2f}")
@@ -265,4 +259,4 @@ class nav2py_pas_crowdnav_controller(nav2py.interfaces.nav2py_costmap_controller
 
 
 if __name__ == "__main__":
-    nav2py.main(nav2py_pas_crowdnav_controller)
+    nav2py.main(nav2py_height_crowdnav_controller)

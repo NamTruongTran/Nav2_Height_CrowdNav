@@ -4,9 +4,8 @@ import numpy as np
 import os
 from collections import deque
 import math
-from PaS_CrowdNav.crowd_nav.configs.config import Config
-from PaS_CrowdNav.rl.model import Policy
-from PaS_CrowdNav.rl.pas_rnn_model import Label_VAE
+from Height_CrowdNav.crowd_nav.configs.config import Config
+from Height_CrowdNav.training.networks.model import Policy
 import logging
 
 
@@ -35,48 +34,48 @@ def set_log_level(logger: logging.Logger, level='info'):
         logger.setLevel(logging.INFO)
 
 
-class PaSController:
+class HeightController:
     """
-    People as Sensors (PaS) controller, used to predict occluded areas and provide navigation decisions
+    ...
     """
 
-    def __init__(self, vae_path=None, policy_path=None, device="cpu", config=None):
+    def __init__(self, policy_path=None, device="cpu", config=None):
         """
-        Initialize PaS controller
+        Initialize Height controller
 
         Args:
-            vae_path: Path to VAE model
-            policy_path: Path to Policy (PAS-RNN) model
+            policy_path: Path to Policy (dsrnn_obs_vertex/selfAttn_merge_srnn/selfAttn_merge_srnn_lidar/homo_transformer_obs/lidar_gru) model
             device: Running device ('cpu' or 'cuda')
             config: Configuration object, if None, use default configuration
         """
-        self.logger = logging.getLogger('pas_controller')
+        self.logger = logging.getLogger('height_controller')
         self.logger.addHandler(logging.StreamHandler(sys.stderr))
 
         set_log_level(self.logger, 'info')
 
         self.config = config if config is not None else Config()
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
-        self.sequence_length = self.config.pas.sequence
+        self.sequence_length = 4
         self.costmap_sequence = deque(maxlen=self.sequence_length)
-        self.grid_resolution = self.config.pas.grid_res
+        self.grid_resolution = self.config.planner.grid_resolution
+        self.use_sequence = True
+
 
         # Expected input dimensions for the model
         self.expected_height = 96
         self.expected_width = 96
 
         # Model and hidden state initialization
-        self.vae_model = None
         self.policy_model = None
         self.model_loaded = False
         self.rnn_hidden_state = None  # Store RNN hidden state
 
         # Load models
-        if vae_path and os.path.exists(vae_path) and policy_path and os.path.exists(policy_path):
+        if policy_path and os.path.exists(policy_path):
             try:
-                self.load_model(vae_path, policy_path)
+                self.load_model(policy_path)
                 self.model_loaded = True
-                self.logger.info(f"Models loaded successfully from {vae_path} and {policy_path}")
+                self.logger.info(f"Models loaded successfully from {policy_path}")
             except Exception as e:
                 self.logger.warn(f"Failed to load model: {e}")
                 self.model_loaded = False
@@ -85,16 +84,14 @@ class PaSController:
             self.model_loaded = False
             self.logger.warn("No model specified or model not found. Using fallback strategy.")
 
-    def load_model(self, vae_path, policy_path):
+    def load_model(self, policy_path):
         """
         Load pre-trained models
 
         Args:
-            vae_path: Path to VAE model file
             policy_path: Path to Policy model file
         """
-        self.logger.info(f"Loading model from {vae_path} and {policy_path}")
-        vae_state_dict = torch.load(vae_path, map_location=self.device)
+        self.logger.info(f"Loading model from {policy_path}")
         policy_state_dict = torch.load(policy_path, map_location=self.device)
 
         class Args:
@@ -108,19 +105,6 @@ class PaSController:
 
         args = Args()
 
-        self.logger.info("Creating Label_VAE instance")
-        self.vae_model = Label_VAE(args)
-
-        try:
-            self.vae_model.load_state_dict(vae_state_dict)
-            self.logger.info("VAE state dict loaded successfully")
-        except Exception as e:
-            self.logger.error(f"Error loading VAE state dict: {e}")
-            raise
-
-        self.vae_model.to(self.device)
-        self.vae_model.eval()
-
         # Create a dummy action_space object
 
         class ActionSpace:
@@ -133,10 +117,9 @@ class PaSController:
         self.logger.info("Creating Policy model instance")
         self.policy_model = Policy(
             action_space=ActionSpace(self.config),
-            config=self.config,
-            base_kwargs=args,
+            obs_shape=(self.expected_height, self.expected_width),  
             base=self.config.robot.policy,
-            vae_path=vae_path
+            base_kwargs=args
         )
 
         # Load model weights
@@ -305,7 +288,7 @@ class PaSController:
         if self.model_loaded:
             # If model is loaded, use model for inference
             try:
-                self.logger.info("Using PaS model for prediction")
+                self.logger.info("Using Height model for prediction")
                 return self.predict_control(robot_state)
             except Exception as e:
                 import traceback
@@ -319,7 +302,7 @@ class PaSController:
 
     def predict_control(self, robot_state):
         """
-        Use PaS model to predict control commands
+        Use Height model to predict control commands
 
         Args:
             robot_state: Tensor containing robot state information
@@ -356,7 +339,7 @@ class PaSController:
                 self.logger.info(f"Costmap tensor shape: {costmap_tensor.shape}")
 
                 # If using sequence input, adjust shape
-                if self.config.pas.seq_flag:
+                if self.use_sequence:
                     # [batch_size, sequence_length, height, width]
                     costmap_tensor_seq = costmap_tensor.permute(1, 0, 2, 3)
                     self.logger.debug("Using sequence input mode")

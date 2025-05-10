@@ -1,5 +1,5 @@
 [project]
-name = "nav2py_pas_crowdnav_controller"
+name = "nav2py_height_crowdnav_controller"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -12,5 +12,7 @@ dependencies = [
     "matplotlib",
     "scipy",
     "Cython",
-    "gym"
+    "gym",
+    "baselines==0.1.5",
+    "opencv-python"
 ]
